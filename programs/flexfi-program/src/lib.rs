@@ -7,14 +7,11 @@ declare_id!("GZYx7tr7vmLp92WgCfyaPmP68zm15RdSiCt31D9fUDoV");
 pub mod flexfi {
     use super::*;
 
-    pub fn create_wallet(ctx: Context<CreateWallet>, seed_phrase: String, password: String) -> Result<()> {
+    pub fn create_wallet(ctx: Context<CreateWallet>) -> Result<()> {
         let wallet = &mut ctx.accounts.user_wallet;
         wallet.owner = *ctx.accounts.owner.key;
-        let wallet_id = blake3_hash(wallet.owner.as_ref());
-        wallet.wallet_id = wallet_id.as_ref().to_vec();
-        wallet.seed_phrase = seed_phrase;
-        let password_hash = blake3_hash(password.as_bytes());
-        wallet.password_hash = password_hash.as_ref().to_vec();
+        let wallet_id = blake3_hash(wallet.owner.as_ref()); // Générer l'ID du portefeuille en fonction du propriétaire
+        wallet.wallet_id = wallet_id.as_ref().to_vec();  // Stocker uniquement un ID de portefeuille sécurisé
         wallet.balance_usd = 0;
         wallet.balance_eur = 0;
         wallet.balance_sol = 0;
@@ -23,6 +20,16 @@ pub mod flexfi {
         wallet.balance_eurcv = 0;
         Ok(())
     }
+
+    pub fn deposit_sol(ctx: Context<DepositSol>, amount: u64) -> Result<()> {
+        let wallet = &mut ctx.accounts.user_wallet;
+    
+        // Augmenter la balance interne de SOL dans le wallet
+        wallet.balance_sol += amount;
+    
+        Ok(())
+    }
+    
 
     pub fn get_wallet_balance(ctx: Context<GetWalletBalance>, asset: String) -> Result<u64> {
         let wallet = &ctx.accounts.user_wallet;
@@ -182,28 +189,6 @@ pub mod flexfi {
         Ok(())
     }
 
-    pub fn view_seed_phrase(ctx: Context<ViewSeedPhrase>, password: String) -> Result<String> {
-        let wallet = &ctx.accounts.user_wallet;
-        let password_hash = blake3_hash(password.as_bytes());
-
-        if password_hash.as_ref() == wallet.password_hash {
-            Ok(wallet.seed_phrase.clone())
-        } else {
-            Err(ErrorCode::InvalidPassword.into())
-        }
-    }
-
-    pub fn verify_password(ctx: Context<VerifyPassword>, password: String) -> Result<()> {
-        let wallet = &ctx.accounts.user_wallet;
-        let password_hash = blake3_hash(password.as_bytes());
-
-        if password_hash.as_ref() == wallet.password_hash {
-            Ok(())
-        } else {
-            Err(ErrorCode::InvalidPassword.into())
-        }
-    }
-
     pub fn request_installment_payment(
         ctx: Context<RequestInstallmentPayment>,
         amount: u64,
@@ -226,29 +211,12 @@ pub mod flexfi {
         transaction.timestamp = Clock::get()?.unix_timestamp;
         Ok(())
     }
-
-    pub fn create_notification(ctx: Context<CreateNotification>, message: String) -> Result<()> {
-        let notification = &mut ctx.accounts.notification;
-        notification.owner = *ctx.accounts.owner.key;
-        notification.message = message;
-        notification.timestamp = Clock::get()?.unix_timestamp;
-        Ok(())
-    }
-
-    pub fn update_account(ctx: Context<UpdateAccount>, new_password: String) -> Result<()> {
-        let wallet = &mut ctx.accounts.user_wallet;
-        let new_password_hash = blake3_hash(new_password.as_bytes());
-        wallet.password_hash = new_password_hash.as_ref().to_vec();
-        Ok(())
-    }
 }
 
 #[account]
 pub struct UserWallet {
     pub owner: Pubkey,
     pub wallet_id: Vec<u8>,
-    pub seed_phrase: String,
-    pub password_hash: Vec<u8>,
     pub balance_usd: u64,
     pub balance_eur: u64,
     pub balance_sol: u64,
@@ -271,13 +239,6 @@ pub struct Transaction {
     pub owner: Pubkey,
     pub description: String,
     pub amount: u64,
-    pub timestamp: i64,
-}
-
-#[account]
-pub struct Notification {
-    pub owner: Pubkey,
-    pub message: String,
     pub timestamp: i64,
 }
 
@@ -363,6 +324,15 @@ pub struct CreateWallet<'info> {
 }
 
 #[derive(Accounts)]
+pub struct DepositSol<'info> {
+    #[account(mut)]
+    pub user_wallet: Account<'info, UserWallet>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct GetWalletBalance<'info> {
     #[account(mut, has_one = owner)]
     pub user_wallet: Account<'info, UserWallet>,
@@ -412,20 +382,6 @@ pub struct UpdateConversionRate<'info> {
 }
 
 #[derive(Accounts)]
-pub struct ViewSeedPhrase<'info> {
-    #[account(mut, has_one = owner)]
-    pub user_wallet: Account<'info, UserWallet>,
-    pub owner: Signer<'info>,
-}
-
-#[derive(Accounts)]
-pub struct VerifyPassword<'info> {
-    #[account(mut, has_one = owner)]
-    pub user_wallet: Account<'info, UserWallet>,
-    pub owner: Signer<'info>,
-}
-
-#[derive(Accounts)]
 pub struct RequestInstallmentPayment<'info> {
     #[account(init, payer = owner, space = 8 + 32 + 8 + 1 + 1 + 8)]
     pub installment_payment: Account<'info, InstallmentPayment>,
@@ -438,15 +394,6 @@ pub struct RequestInstallmentPayment<'info> {
 pub struct LogTransaction<'info> {
     #[account(init, payer = owner, space = 8 + 32 + 4 + 64 + 8)]
     pub transaction: Account<'info, Transaction>,
-    #[account(mut)]
-    pub owner: Signer<'info>,
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct CreateNotification<'info> {
-    #[account(init, payer = owner, space = 8 + 32 + 4 + 64 + 8)]
-    pub notification: Account<'info, Notification>,
     #[account(mut)]
     pub owner: Signer<'info>,
     pub system_program: Program<'info, System>,
