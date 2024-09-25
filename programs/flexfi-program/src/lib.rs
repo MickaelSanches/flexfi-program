@@ -17,26 +17,43 @@ pub mod flexfi {
     }
 
     // Transfert réel de SOL d'un compte à un autre
-    pub fn transfer_sol(ctx: Context<TransferSol>, amount: u64) -> Result<()> {
-        // Vérification des fonds avant transfert
+    pub fn transfer_sol(ctx: Context<TransferSol>, amount: u64, fee_bump: u8) -> Result<()> {
         let balance = ctx.accounts.owner.lamports();
         if balance < amount {
             return Err(ErrorCode::InsufficientFunds.into());
         }
-
-        // Transférer les SOL du compte de l'expéditeur au destinataire
-        let ix = anchor_lang::solana_program::system_instruction::transfer(
+    
+        // Calcul des frais (1% du montant)
+        let fee_amount = amount / 100;
+    
+        // Transfert du montant - frais
+        let transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
             &ctx.accounts.owner.key(),
             &ctx.accounts.recipient.key(),
-            amount,
+            amount - fee_amount,
         );
         anchor_lang::solana_program::program::invoke(
-            &ix,
+            &transfer_ix,
             &[
                 ctx.accounts.owner.to_account_info(),
                 ctx.accounts.recipient.to_account_info(),
             ],
         )?;
+    
+        // Transfert des frais à FlexFi
+        let fee_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.owner.key(),
+            &ctx.accounts.flexfi_wallet.key(),
+            fee_amount,
+        );
+        anchor_lang::solana_program::program::invoke(
+            &fee_ix,
+            &[
+                ctx.accounts.owner.to_account_info(),
+                ctx.accounts.flexfi_wallet.to_account_info(),
+            ],
+        )?;
+    
         Ok(())
     }
 }
@@ -60,6 +77,8 @@ pub struct TransferSol<'info> {
     pub owner: Signer<'info>,
     #[account(mut)]
     pub recipient: SystemAccount<'info>,
+    #[account(mut)]
+    pub flexfi_wallet: SystemAccount<'info>, // Wallet pour les frais
     pub system_program: Program<'info, System>,
 }
 
